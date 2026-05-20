@@ -503,11 +503,45 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
                 <div className="key-item flex-between"><span className="key-badge">A / ◄</span><span>Girar Izq</span></div>
                 <div className="key-item flex-between"><span className="key-badge">D / ►</span><span>Girar Der</span></div>
                 <div className="key-item flex-between"><span className="key-badge">S / ▼</span><span>Frenar</span></div>
+                <div className="key-item flex-between"><span className="key-badge">ESPACIO</span><span className="text-cyan font-bold">DISPARAR LÁSER</span></div>
               </div>
             </div>
           </div>
         )}
       </div>
+
+      {/* Defensa de la Tierra */}
+      {config.earthHp !== undefined && (
+        <div className="panel-section border-top-glow bg-tactical-alarm">
+          <div className="section-header">
+            <span className="section-title flex-center gap-1 text-danger font-bold">
+              🛡️ DEFENSA DE LA TIERRA
+            </span>
+            <span className="hud-pulse-red animate-pulse">• EN COMBATE</span>
+          </div>
+
+          <div className="combat-status mt-2">
+            <div className="flex-between">
+              <span className="text-xs">Integridad del Planeta:</span>
+              <strong className={`text-sm ${config.earthHp < 35 ? 'text-red animate-pulse-glow font-bold' : (config.earthHp < 65 ? 'text-yellow' : 'text-success')}`}>
+                {config.earthHp}%
+              </strong>
+            </div>
+
+            {/* Health bar visualization */}
+            <div className="earth-hp-bar-container mt-1">
+              <div 
+                className={`earth-hp-bar ${config.earthHp < 35 ? 'bg-danger-glow' : (config.earthHp < 65 ? 'bg-warning-glow' : 'bg-success-glow')}`}
+                style={{ width: `${config.earthHp}%` }}
+              ></div>
+            </div>
+
+            <p className="text-xxs mt-2 text-muted uppercase tracking-wider text-center">
+              {config.earthHp <= 0 ? 'La Tierra ha sido destruida' : '¡Derriba las naves enemigas antes de que nos pulvericen!'}
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Guide/Instructions */}
       <div className="panel-section border-top-glow">

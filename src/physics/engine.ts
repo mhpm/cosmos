@@ -1,4 +1,4 @@
-import type { Body, PhysicsConfig, Spaceship } from './types';
+import type { Body, PhysicsConfig, Spaceship, Bullet, AlienShip } from './types';
 
 // Softening factor to prevent divide-by-zero or infinite forces at close distances
 const SOFTENING = 15;
@@ -334,26 +334,9 @@ export function stepSpaceship(
     braking: isBraking,
   };
 
-  // 5. Collision checks with bodies
+  // 5. Collision checks with bodies (Disabled by request so the ship can fly freely through stars and planets)
   let collided = false;
   let hitBodyName = '';
-  const shipRadius = 4.5; // Visual size is 4.5px
-
-  for (let i = 0; i < bodies.length; i++) {
-    const b = bodies[i];
-    if (b.crushed) continue;
-
-    const dx = b.x - x;
-    const dy = b.y - y;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    
-    // Check overlap
-    if (dist < b.radius + shipRadius) {
-      collided = true;
-      hitBodyName = b.name;
-      break;
-    }
-  }
 
   if (collided) {
     updatedShip.active = false;
@@ -365,5 +348,192 @@ export function stepSpaceship(
     ship: updatedShip,
     collided,
     hitBodyName
+  };
+}
+
+/**
+ * Steps the combat physics: moves bullets, updates alien ships, manages laser firing,
+ * and handles damage checks and hits.
+ */
+export function stepCombat(
+  bullets: Bullet[],
+  alienShips: AlienShip[],
+  bodies: Body[],
+  config: PhysicsConfig,
+  dt: number,
+  onAlienDestroyed?: (shipId: string, x: number, y: number) => void
+): {
+  bullets: Bullet[];
+  alienShips: AlienShip[];
+  earthDamage: number;
+} {
+  const actualDt = dt * config.timeScale;
+  if (actualDt <= 0) return { bullets, alienShips, earthDamage: 0 };
+
+  const earth = bodies.find(b => b.id === 'earth');
+  let earthDamage = 0;
+
+  // 1. Move bullets and filter active ones
+  const nextBullets: Bullet[] = [];
+  for (let i = 0; i < bullets.length; i++) {
+    const b = bullets[i];
+    b.x += b.vx * actualDt;
+    b.y += b.vy * actualDt;
+    b.lifeTime -= actualDt;
+
+    if (b.lifeTime > 0) {
+      nextBullets.push(b);
+    }
+  }
+
+  // 2. Move and step Alien Ships
+  const nextAlienShips: AlienShip[] = [];
+  for (let i = 0; i < alienShips.length; i++) {
+    const alien = alienShips[i];
+    
+    // Decrease shoot cooldown
+    if (alien.shootCooldown > 0) {
+      alien.shootCooldown -= actualDt;
+    }
+
+    // Alien AI: Seek Earth or Sun if Earth is dead
+    const target = earth || bodies.find(b => b.id === 'sun') || { x: 0, y: 0 };
+    const dx = target.x - alien.x;
+    const dy = target.y - alien.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    // Apply thrust towards target
+    let ax = 0;
+    let ay = 0;
+    if (dist > 0) {
+      const seekAcceleration = 50; // units/s^2
+      ax = (dx / dist) * seekAcceleration;
+      ay = (dy / dist) * seekAcceleration;
+    }
+
+    // Add gravity from Sun if sun exists (to make their flight orbits dynamic!)
+    const sun = bodies.find(b => b.id === 'sun');
+    if (sun) {
+      const sDx = sun.x - alien.x;
+      const sDy = sun.y - alien.y;
+      const sDistSq = sDx * sDx + sDy * sDy;
+      const sDist = Math.sqrt(sDistSq);
+      if (sDist > 20) {
+        const acc = (config.G * sun.mass) / (sDistSq + 225); // softened gravity
+        ax += (sDx / sDist) * acc;
+        ay += (sDy / sDist) * acc;
+      }
+    }
+
+    // Euler step alien velocity
+    alien.vx += ax * actualDt;
+    alien.vy += ay * actualDt;
+
+    // Cap velocity
+    const speed = Math.sqrt(alien.vx * alien.vx + alien.vy * alien.vy);
+    const maxSpeed = 35;
+    if (speed > maxSpeed) {
+      alien.vx = (alien.vx / speed) * maxSpeed;
+      alien.vy = (alien.vy / speed) * maxSpeed;
+    }
+
+    // Step position
+    alien.x += alien.vx * actualDt;
+    alien.y += alien.vy * actualDt;
+
+    // Firing logic: if close to Earth, fire a bullet!
+    if (earth && dist < 450 && alien.shootCooldown <= 0) {
+      // Fire bullet towards Earth
+      const bulletSpeed = 160;
+      const bVx = (dx / dist) * bulletSpeed + alien.vx * 0.3;
+      const bVy = (dy / dist) * bulletSpeed + alien.vy * 0.3;
+
+      nextBullets.push({
+        id: `alien-bullet-${Math.random().toString(36).substr(2, 9)}`,
+        x: alien.x,
+        y: alien.y,
+        vx: bVx,
+        vy: bVy,
+        isEnemy: true,
+        radius: 3.5,
+        color: '#ff3366', // red enemy plasma
+        lifeTime: 4.5,
+      });
+
+      alien.shootCooldown = 2.0 + Math.random() * 1.5; // fire every 2 - 3.5s
+    }
+
+    nextAlienShips.push(alien);
+  }
+
+  // 3. Resolve Bullet Collisions
+  const finalBullets: Bullet[] = [];
+  const hitShipsSet = new Set<string>();
+
+  for (let i = 0; i < nextBullets.length; i++) {
+    const bullet = nextBullets[i];
+    let bulletAbsorbed = false;
+
+    // A. Check collision with physical celestial bodies (planets/stars) (Only for enemy bullets)
+    if (bullet.isEnemy) {
+      for (let j = 0; j < bodies.length; j++) {
+        const planet = bodies[j];
+        const pDx = planet.x - bullet.x;
+        const pDy = planet.y - bullet.y;
+        const pDist = Math.sqrt(pDx * pDx + pDy * pDy);
+
+        // Hit planet!
+        if (pDist < planet.radius + bullet.radius) {
+          bulletAbsorbed = true;
+          
+          // If it's an enemy bullet hitting Earth specifically, accumulate Earth damage
+          if (planet.id === 'earth') {
+            earthDamage += 2; // 2 damage per hit (reduced by another 50%)
+          }
+          break;
+        }
+      }
+    }
+
+    if (bulletAbsorbed) continue;
+
+    // B. Check collision with Alien Ships (if player bullet)
+    if (!bullet.isEnemy) {
+      for (let j = 0; j < nextAlienShips.length; j++) {
+        const alien = nextAlienShips[j];
+        if (hitShipsSet.has(alien.id)) continue;
+
+        const aDx = alien.x - bullet.x;
+        const aDy = alien.y - bullet.y;
+        const aDist = Math.sqrt(aDx * aDx + aDy * aDy);
+
+        // Hit alien ship!
+        if (aDist < alien.radius + bullet.radius) {
+          alien.hp -= 10; // take 10 damage
+          bulletAbsorbed = true;
+
+          if (alien.hp <= 0) {
+            hitShipsSet.add(alien.id);
+            if (onAlienDestroyed) {
+              onAlienDestroyed(alien.id, alien.x, alien.y);
+            }
+          }
+          break;
+        }
+      }
+    }
+
+    if (!bulletAbsorbed) {
+      finalBullets.push(bullet);
+    }
+  }
+
+  // Filter out destroyed alien ships
+  const finalAlienShips = nextAlienShips.filter(alien => !hitShipsSet.has(alien.id));
+
+  return {
+    bullets: finalBullets,
+    alienShips: finalAlienShips,
+    earthDamage,
   };
 }

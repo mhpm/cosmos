@@ -862,3 +862,202 @@ body {
     opacity: 1;
   }
 }
+
+/* Combat & Invasion HUD Elements */
+
+.bg-tactical-alarm {
+  background: rgba(239, 68, 68, 0.04) !important;
+  border-left: 2px solid rgba(239, 68, 68, 0.4) !important;
+  animation: alarm-pulse-bg 2.5s ease-in-out infinite alternate;
+}
+
+@keyframes alarm-pulse-bg {
+  0% { background: rgba(239, 68, 68, 0.02) !important; }
+  100% { background: rgba(239, 68, 68, 0.07) !important; }
+}
+
+.hud-pulse-red {
+  font-family: var(--font-hud);
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: #ef4444;
+  text-shadow: 0 0 6px rgba(239, 68, 68, 0.6);
+}
+
+.earth-hp-bar-container {
+  width: 100%;
+  height: 8px;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.earth-hp-bar {
+  height: 100%;
+  transition: width 0.3s ease;
+}
+
+.bg-success-glow {
+  background: linear-gradient(90deg, #10b981, #34d399);
+  box-shadow: 0 0 6px rgba(52, 211, 153, 0.4);
+}
+
+.bg-warning-glow {
+  background: linear-gradient(90deg, #d97706, #fbbf24);
+  box-shadow: 0 0 6px rgba(251, 191, 36, 0.4);
+}
+
+.bg-danger-glow {
+  background: linear-gradient(90deg, #dc2626, #f87171);
+  box-shadow: 0 0 10px rgba(248, 113, 113, 0.7);
+}
+
+.animate-pulse-glow-red {
+  animation: pulse-glow-red 1.2s ease-in-out infinite alternate;
+}
+
+@keyframes pulse-glow-red {
+  0% {
+    filter: drop-shadow(0 0 2px rgba(239, 68, 68, 0.4));
+    opacity: 0.8;
+  }
+  100% {
+    filter: drop-shadow(0 0 10px rgba(239, 68, 68, 0.9));
+    opacity: 1;
+  }
+}
+
+/* Game Over Screen Overlay */
+.game-over-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1000;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background: rgba(4, 4, 12, 0.85);
+  backdrop-filter: blur(12px);
+  animation: fade-in 0.4s ease;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.game-over-card {
+  width: 90%;
+  max-width: 480px;
+  background: rgba(12, 12, 24, 0.75);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: 12px;
+  padding: 30px;
+  text-align: center;
+  box-shadow: 0 0 35px rgba(239, 68, 68, 0.15), inset 0 0 20px rgba(239, 68, 68, 0.05);
+  backdrop-filter: blur(10px);
+  position: relative;
+  overflow: hidden;
+  animation: scale-up 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes scale-up {
+  from { transform: scale(0.9); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.game-over-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #ef4444, transparent);
+  animation: sweep 3s linear infinite;
+}
+
+@keyframes sweep {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.game-over-title {
+  font-family: var(--font-hud);
+  font-size: 1.6rem;
+  color: #ff4d4d;
+  letter-spacing: 0.15rem;
+  text-shadow: 0 0 10px rgba(255, 77, 77, 0.5);
+  margin-bottom: 12px;
+}
+
+.game-over-divider {
+  height: 1px;
+  background: linear-gradient(90deg, rgba(239, 68, 68, 0), rgba(239, 68, 68, 0.5), rgba(239, 68, 68, 0));
+  margin: 15px auto;
+  width: 80%;
+}
+
+.game-over-desc {
+  font-size: 0.85rem;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.7);
+  margin-bottom: 25px;
+}
+
+.game-over-stats {
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.03);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 25px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.75rem;
+}
+
+.stat-label {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.stat-val {
+  font-family: var(--font-hud);
+  font-weight: 700;
+}
+
+.game-over-btn {
+  width: 100%;
+  padding: 12px;
+  font-family: var(--font-hud);
+  font-size: 0.85rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #ffffff;
+  background: linear-gradient(90deg, #dc2626, #b91c1c);
+  border: 1px solid #ef4444;
+  border-radius: 6px;
+  cursor: pointer;
+  outline: none;
+  box-shadow: 0 0 15px rgba(220, 38, 38, 0.3);
+  transition: all 0.2s ease;
+}
+
+.game-over-btn:hover {
+  background: linear-gradient(90deg, #ef4444, #dc2626);
+  box-shadow: 0 0 25px rgba(239, 68, 68, 0.6);
+  transform: translateY(-1px);
+}
+
+.game-over-btn:active {
+  transform: translateY(1px);
+}

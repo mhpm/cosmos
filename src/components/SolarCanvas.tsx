@@ -1,6 +1,5 @@
-import React, { useRef, useEffect, useState } from 'react';
-import type { MouseEvent, WheelEvent } from 'react';
-import type { Body, PhysicsConfig, Point, Spaceship, Particle } from '../physics/types';
+import React, { useRef, useState, useEffect } from 'react';
+import type { Body, PhysicsConfig, Point, Spaceship, Particle, Bullet, AlienShip } from '../physics/types';
 import { drawSpaceGrid } from './SpaceGrid';
 
 interface SolarCanvasProps {
@@ -11,6 +10,8 @@ interface SolarCanvasProps {
   launchPreset: { mass: number; radius: number; color: string; name: string } | null;
   onSimulationTick: (callback: () => void) => void;
   shipRef: React.MutableRefObject<Spaceship | null>;
+  bulletsRef: React.MutableRefObject<Bullet[]>;
+  alienShipsRef: React.MutableRefObject<AlienShip[]>;
 }
 
 export const SolarCanvas: React.FC<SolarCanvasProps> = ({
@@ -21,6 +22,8 @@ export const SolarCanvas: React.FC<SolarCanvasProps> = ({
   launchPreset,
   onSimulationTick,
   shipRef,
+  bulletsRef,
+  alienShipsRef,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -46,6 +49,11 @@ export const SolarCanvas: React.FC<SolarCanvasProps> = ({
   const particlesRef = useRef<Particle[]>([]);
   const wasShipActiveRef = useRef<boolean>(false);
   const wasShipPosRef = useRef<{ x: number; y: number; vx: number; vy: number }>({ x: 0, y: 0, vx: 0, vy: 0 });
+
+  // Combat history trackers for animations
+  const prevAlienShipsRef = useRef<AlienShip[] | null>(null);
+  const prevBodiesRef = useRef<Body[] | null>(null);
+
   if (starsRef.current.length === 0) {
     const list = [];
     for (let i = 0; i < 200; i++) {
@@ -107,7 +115,7 @@ export const SolarCanvas: React.FC<SolarCanvasProps> = ({
   };
 
   // Mouse Handlers
-  const handleMouseDown = (e: MouseEvent<HTMLCanvasElement>) => {
+  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
@@ -156,7 +164,7 @@ export const SolarCanvas: React.FC<SolarCanvasProps> = ({
     }
   };
 
-  const handleMouseMove = (e: MouseEvent<HTMLCanvasElement>) => {
+  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
@@ -216,7 +224,7 @@ export const SolarCanvas: React.FC<SolarCanvasProps> = ({
   };
 
   // Zoom Handler
-  const handleWheel = (e: WheelEvent<HTMLCanvasElement>) => {
+  const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
     e.preventDefault();
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -249,6 +257,60 @@ export const SolarCanvas: React.FC<SolarCanvasProps> = ({
     const { zoom, offsetX, offsetY } = cameraRef.current;
     const bodies = bodiesRef.current;
     const ship = shipRef.current;
+    const bullets = bulletsRef.current;
+    const alienShips = alienShipsRef.current;
+
+    // A. Detect Alien Ship explosions
+    if (prevAlienShipsRef.current) {
+      const currentIds = new Set(alienShips.map(s => s.id));
+      for (const prevShip of prevAlienShipsRef.current) {
+        if (!currentIds.has(prevShip.id)) {
+          // Spawn green sparks
+          for (let k = 0; k < 25; k++) {
+            const expAngle = Math.random() * Math.PI * 2;
+            const expSpeed = 20 + Math.random() * 85;
+            particlesRef.current.push({
+              x: prevShip.x,
+              y: prevShip.y,
+              vx: Math.cos(expAngle) * expSpeed + prevShip.vx * 0.3,
+              vy: Math.sin(expAngle) * expSpeed + prevShip.vy * 0.3,
+              color: Math.random() > 0.4 ? '#54f2a7' : '#10b981',
+              size: 2.0 + Math.random() * 3.0,
+              alpha: 1.0,
+              decay: 0.025 + Math.random() * 0.02,
+            });
+          }
+        }
+      }
+    }
+    prevAlienShipsRef.current = alienShips.map(s => ({ ...s }));
+
+    // B. Detect Earth explosion
+    if (prevBodiesRef.current) {
+      const wasEarthPresent = prevBodiesRef.current.some(b => b.id === 'earth');
+      const isEarthPresent = bodies.some(b => b.id === 'earth');
+      if (wasEarthPresent && !isEarthPresent) {
+        const lastEarth = prevBodiesRef.current.find(b => b.id === 'earth');
+        if (lastEarth) {
+          // Spawn massive fire storm
+          for (let k = 0; k < 150; k++) {
+            const expAngle = Math.random() * Math.PI * 2;
+            const expSpeed = 40 + Math.random() * 260;
+            particlesRef.current.push({
+              x: lastEarth.x,
+              y: lastEarth.y,
+              vx: Math.cos(expAngle) * expSpeed + lastEarth.vx * 0.25,
+              vy: Math.sin(expAngle) * expSpeed + lastEarth.vy * 0.25,
+              color: Math.random() > 0.65 ? '#ffffff' : (Math.random() > 0.3 ? '#ff7700' : '#ff4d4d'),
+              size: 4.0 + Math.random() * 7.5,
+              alpha: 1.0,
+              decay: 0.007 + Math.random() * 0.012,
+            });
+          }
+        }
+      }
+    }
+    prevBodiesRef.current = bodies.map(b => ({ ...b }));
 
     // 1. Clear Screen
     ctx.fillStyle = '#05050e'; // Super deep space black
@@ -387,6 +449,43 @@ export const SolarCanvas: React.FC<SolarCanvasProps> = ({
         ctx.beginPath();
         ctx.arc(screenPos.x, screenPos.y, screenRad, 0, Math.PI * 2);
         ctx.fill();
+      }
+
+      // Draw Earth's health bar hovering above Earth
+      if (b.id === 'earth' && config.earthHp !== undefined && config.maxEarthHp !== undefined) {
+        const hp = config.earthHp;
+        const maxHp = config.maxEarthHp;
+
+        if (hp > 0) {
+          ctx.save();
+          const barW = Math.max(30, screenRad * 2.2);
+          const barH = 4;
+          const barX = screenPos.x - barW / 2;
+          const barY = screenPos.y - screenRad * 1.4 - 2;
+
+          // Bar Border & Glow Background
+          ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+          ctx.fillRect(barX - 1, barY - 1, barW + 2, barH + 2);
+
+          // Bar Health Fill (Green -> Yellow -> Red)
+          const pct = hp / maxHp;
+          let barCol = '#54f2a7'; // green
+          if (pct < 0.3) {
+            barCol = '#ff4d4d'; // red
+          } else if (pct < 0.6) {
+            barCol = '#ffb900'; // yellow
+          }
+
+          ctx.fillStyle = barCol;
+          ctx.fillRect(barX, barY, barW * pct, barH);
+
+          // Render small text percentage
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+          ctx.font = 'bold 8px Orbitron, Inter, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText(`HP: ${hp}%`, screenPos.x, barY - 4);
+          ctx.restore();
+        }
       }
 
       // Draw planet rings (special visual for Saturn-like body)
@@ -605,7 +704,167 @@ export const SolarCanvas: React.FC<SolarCanvasProps> = ({
       }
     }
 
-    // 7. Draw Camera Follow Mode Indicator
+    // 6. Draw Bullets (Lasers and Plasma)
+    for (let i = 0; i < bullets.length; i++) {
+      const b = bullets[i];
+      const screenPos = simToScreen(b.x, b.y);
+      const screenRad = Math.max(1.5, b.radius * zoom);
+
+      if (
+        screenPos.x < -20 || screenPos.x > width + 20 ||
+        screenPos.y < -20 || screenPos.y > height + 20
+      ) {
+        continue;
+      }
+
+      ctx.save();
+      if (!b.isEnemy) {
+        ctx.strokeStyle = '#00f2fe';
+        ctx.lineWidth = Math.max(2.5, 2.5 * zoom);
+        ctx.shadowBlur = 8;
+        ctx.shadowColor = '#00f2fe';
+
+        const speed = Math.sqrt(b.vx * b.vx + b.vy * b.vy);
+        const length = 15;
+        const tailSimX = b.x - (b.vx / (speed || 1)) * length;
+        const tailSimY = b.y - (b.vy / (speed || 1)) * length;
+        const tailScreen = simToScreen(tailSimX, tailSimY);
+
+        ctx.beginPath();
+        ctx.moveTo(screenPos.x, screenPos.y);
+        ctx.lineTo(tailScreen.x, tailScreen.y);
+        ctx.stroke();
+      } else {
+        const gradient = ctx.createRadialGradient(
+          screenPos.x, screenPos.y, screenRad * 0.1,
+          screenPos.x, screenPos.y, screenRad * 2
+        );
+        gradient.addColorStop(0, '#ffffff');
+        gradient.addColorStop(0.3, '#ff3366');
+        gradient.addColorStop(1, 'rgba(255, 51, 102, 0)');
+
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.arc(screenPos.x, screenPos.y, screenRad * 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    // 7. Draw Alien Ships
+    for (let i = 0; i < alienShips.length; i++) {
+      const alien = alienShips[i];
+      const screenPos = simToScreen(alien.x, alien.y);
+      const screenRad = Math.max(5.5, alien.radius * zoom);
+
+      if (
+        screenPos.x < 15 || screenPos.x > width - 15 ||
+        screenPos.y < 15 || screenPos.y > height - 15
+      ) {
+        const padding = 20;
+        const cx = Math.max(padding, Math.min(width - padding, screenPos.x));
+        const cy = Math.max(padding, Math.min(height - padding, screenPos.y));
+        
+        const centerX = width / 2;
+        const centerY = height / 2;
+        const angleToAlien = Math.atan2(screenPos.y - centerY, screenPos.x - centerX);
+        
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(angleToAlien);
+        
+        ctx.fillStyle = '#10b981';
+        ctx.shadowColor = '#54f2a7';
+        ctx.shadowBlur = 8;
+        ctx.beginPath();
+        ctx.moveTo(8, 0);
+        ctx.lineTo(-6, -6);
+        ctx.lineTo(-6, 6);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+        
+        const ship = shipRef.current;
+        const refPos = ship && ship.active ? ship : (bodies.find(b => b.id === 'earth') || { x: 0, y: 0 });
+        const simDist = Math.round(Math.sqrt((alien.x - refPos.x) ** 2 + (alien.y - refPos.y) ** 2));
+        
+        ctx.save();
+        ctx.fillStyle = '#10b981';
+        ctx.font = '9px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        
+        const tx = cx - Math.cos(angleToAlien) * 16;
+        const ty = cy - Math.sin(angleToAlien) * 16;
+        ctx.fillText(`${simDist}u`, tx, ty);
+        ctx.restore();
+        
+        continue;
+      }
+
+      ctx.save();
+
+      // Thruster green aura glow
+      const glowGrad = ctx.createRadialGradient(
+        screenPos.x, screenPos.y, screenRad * 0.2,
+        screenPos.x, screenPos.y, screenRad * 2.2
+      );
+      glowGrad.addColorStop(0, 'rgba(84, 242, 167, 0.45)');
+      glowGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = glowGrad;
+      ctx.beginPath();
+      ctx.arc(screenPos.x, screenPos.y, screenRad * 2.2, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Saucer body shape
+      ctx.fillStyle = '#065f46'; // dark green emerald body
+      ctx.strokeStyle = '#34d399'; // glowing green edge
+      ctx.lineWidth = 1.8;
+
+      ctx.beginPath();
+      ctx.ellipse(screenPos.x, screenPos.y, screenRad * 1.3, screenRad * 0.6, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+
+      // Saucer glass dome
+      ctx.fillStyle = 'rgba(16, 185, 129, 0.7)'; // glass emerald dome
+      ctx.beginPath();
+      ctx.arc(screenPos.x, screenPos.y - screenRad * 0.25, screenRad * 0.5, Math.PI, 0);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      // Blinking saucer lights
+      const time = Date.now() / 150;
+      const perimeterDots = 4;
+      for (let d = 0; d < perimeterDots; d++) {
+        const dotAngle = (d / perimeterDots) * Math.PI * 2 + time * 0.1;
+        const dotX = screenPos.x + Math.cos(dotAngle) * screenRad * 1.0;
+        const dotY = screenPos.y + Math.sin(dotAngle) * screenRad * 0.45;
+        
+        ctx.fillStyle = d % 2 === 0 ? '#ef4444' : '#34d399';
+        ctx.beginPath();
+        ctx.arc(dotX, dotY, Math.max(1, 1.2 * zoom), 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Alien HP Bar
+      if (alien.hp < alien.maxHp) {
+        const barW = screenRad * 1.6;
+        const barH = 3;
+        const barX = screenPos.x - barW / 2;
+        const barY = screenPos.y - screenRad * 1.0;
+
+        ctx.fillStyle = 'rgba(255, 0, 0, 0.4)';
+        ctx.fillRect(barX, barY, barW, barH);
+        ctx.fillStyle = '#34d399';
+        ctx.fillRect(barX, barY, barW * (alien.hp / alien.maxHp), barH);
+      }
+
+      ctx.restore();
+    }
+
+    // 8. Draw Camera Follow Mode Indicator
     if (config.followShip && ship && ship.active) {
       cameraRef.current.offsetX = width / 2 - ship.x * zoom;
       cameraRef.current.offsetY = height / 2 - ship.y * zoom;

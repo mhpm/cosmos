@@ -40,6 +40,9 @@ export interface PhysicsConfig {
   cameraOffsetY: number;
   shipSpawned: boolean;
   followShip: boolean;
+  gameStatus?: 'playing' | 'gameover';
+  earthHp?: number;
+  maxEarthHp?: number;
 }
 
 export interface Spaceship {
@@ -62,6 +65,31 @@ export interface Particle {
   size: number;
   alpha: number;
   decay: number;
+}
+
+export interface Bullet {
+  id: string;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  isEnemy: boolean;
+  radius: number;
+  color: string;
+  lifeTime: number;
+}
+
+export interface AlienShip {
+  id: string;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  radius: number;
+  color: string;
+  hp: number;
+  maxHp: number;
+  shootCooldown: number;
 }
 
 export interface SimulationPreset {
