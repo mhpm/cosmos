@@ -10,6 +10,7 @@ import { PRESETS } from './physics/presets';
 import { stepPhysics, stepSpaceship, stepCombat } from './physics/engine';
 import { SolarCanvas } from './components/SolarCanvas';
 import { PlanetInspector } from './components/PlanetInspector';
+import { MobileControls } from './components/MobileControls';
 import './App.css';
 
 type SpaceAmbienceHandle = {
@@ -215,7 +216,6 @@ function App() {
 
   // HUD states (polled at intervals to prevent component lag)
   const [bodyCount, setBodyCount] = useState<number>(0);
-  const [fps, setFps] = useState<number>(60);
   const [killCount, setKillCount] = useState<number>(0);
   const killCountRef = useRef<number>(0);
   const frameCountRef = useRef<number>(0);
@@ -506,10 +506,6 @@ function App() {
       // 4. Track FPS, Body Count, and Spaceship HUD telemetry
       frameCountRef.current++;
       if (time - lastFpsTimeRef.current >= 200) {
-        const measuredFps = Math.round(
-          (frameCountRef.current * 1000) / (time - lastFpsTimeRef.current),
-        );
-        setFps(measuredFps);
         setBodyCount(bodiesRef.current.length);
 
         if (shipRef.current) {
@@ -609,16 +605,16 @@ function App() {
         </div>
       )}
 
+      {/* Mobile Joystick Controls (only visible on mobile devices when playing) */}
+      {config.gameStatus === 'playing' && ship && ship.active && (
+        <MobileControls keysPressedRef={keysPressedRef} />
+      )}
+
       {/* Bottom HUD stats */}
       <div className="bottom-hud">
         <div className="hud-metric">
           <span className="hud-label">CUERPOS:</span>
           <span className="hud-val text-cyan">{bodyCount}</span>
-        </div>
-        <div className="hud-separator">|</div>
-        <div className="hud-metric">
-          <span className="hud-label">FPS:</span>
-          <span className="hud-val text-green">{fps}</span>
         </div>
         {config.gameStatus === 'playing' && (
           <>
