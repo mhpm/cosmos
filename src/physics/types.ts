@@ -77,7 +77,24 @@ export interface Bullet {
   radius: number;
   color: string;
   lifeTime: number;
+  isMissile?: boolean;
+  isMine?: boolean;
 }
+
+export interface Satellite {
+  id: string;
+  parentId: string;
+  orbitRadius: number;
+  orbitSpeed: number; // in rad/s
+  angle: number; // in rad
+  type: 'decorative' | 'defensive';
+  color: string;
+  size: number;
+  x: number;
+  y: number;
+  shootCooldown?: number;
+}
+
 
 export interface AlienShip {
   id: string;
@@ -90,6 +107,8 @@ export interface AlienShip {
   hp: number;
   maxHp: number;
   shootCooldown: number;
+  shipType?: 'saucer' | 'scout' | 'cruiser' | 'bomber' | 'kamikaze';
+  maxSpeed?: number;
 }
 
 export interface SimulationPreset {

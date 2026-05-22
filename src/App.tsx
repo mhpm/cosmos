@@ -5,13 +5,134 @@ import type {
   Spaceship,
   Bullet,
   AlienShip,
+  Satellite,
 } from './physics/types';
 import { PRESETS } from './physics/presets';
-import { stepPhysics, stepSpaceship, stepCombat } from './physics/engine';
+import { stepPhysics, stepSpaceship, stepCombat, stepSatellites } from './physics/engine';
 import { SolarCanvas } from './components/SolarCanvas';
 import { PlanetInspector } from './components/PlanetInspector';
 import { MobileControls } from './components/MobileControls';
 import './App.css';
+
+const generateSatellitesForPreset = (bodies: Body[]): Satellite[] => {
+  const list: Satellite[] = [];
+
+  for (let i = 0; i < bodies.length; i++) {
+    const body = bodies[i];
+    if (body.isStatic && body.id !== 'earth') continue;
+    if (
+      body.id.includes('sun') ||
+      body.id.includes('star') ||
+      body.name.toLowerCase().includes('sol') ||
+      body.name.toLowerCase().includes('estrella')
+    ) {
+      continue;
+    }
+
+    if (body.id === 'earth') {
+      // 1. Defensive Space Probe (orbiting Earth)
+      list.push({
+        id: `sat-defense-${Math.random().toString(36).substr(2, 9)}`,
+        parentId: body.id,
+        orbitRadius: body.radius + 14,
+        orbitSpeed: -0.65, // Orbit counter-clockwise
+        angle: Math.random() * Math.PI * 2,
+        type: 'defensive',
+        color: '#38bdf8', // Sky-blue cyan
+        size: 3.5,
+        x: body.x,
+        y: body.y,
+        shootCooldown: 1.0, // Shoots in 1s initially
+      });
+
+      // 2. Decorative Satellite 1 (ISS style)
+      list.push({
+        id: `sat-dec-earth-1-${Math.random().toString(36).substr(2, 9)}`,
+        parentId: body.id,
+        orbitRadius: body.radius + 7.5,
+        orbitSpeed: 1.1,
+        angle: Math.random() * Math.PI * 2,
+        type: 'decorative',
+        color: '#e2e8f0', // Silver
+        size: 1.8,
+        x: body.x,
+        y: body.y,
+      });
+
+      // 3. Decorative Satellite 2 (GPS/Communication)
+      list.push({
+        id: `sat-dec-earth-2-${Math.random().toString(36).substr(2, 9)}`,
+        parentId: body.id,
+        orbitRadius: body.radius + 22,
+        orbitSpeed: 0.45,
+        angle: Math.random() * Math.PI * 2,
+        type: 'decorative',
+        color: '#ffd369', // Gold
+        size: 1.5,
+        x: body.x,
+        y: body.y,
+      });
+    } else if (body.id === 'mars') {
+      list.push({
+        id: `sat-dec-mars-${Math.random().toString(36).substr(2, 9)}`,
+        parentId: body.id,
+        orbitRadius: body.radius + 7.0,
+        orbitSpeed: -0.95,
+        angle: Math.random() * Math.PI * 2,
+        type: 'decorative',
+        color: '#fca5a5',
+        size: 1.6,
+        x: body.x,
+        y: body.y,
+      });
+    } else if (body.id === 'jupiter') {
+      list.push({
+        id: `sat-dec-jupiter-${Math.random().toString(36).substr(2, 9)}`,
+        parentId: body.id,
+        orbitRadius: body.radius + 15,
+        orbitSpeed: 0.35,
+        angle: Math.random() * Math.PI * 2,
+        type: 'decorative',
+        color: '#cbd5e1',
+        size: 2.5,
+        x: body.x,
+        y: body.y,
+      });
+    } else if (body.id === 'saturn') {
+      list.push({
+        id: `sat-dec-saturn-${Math.random().toString(36).substr(2, 9)}`,
+        parentId: body.id,
+        orbitRadius: body.radius * 2.0, // Cassini outside Saturn rings
+        orbitSpeed: -0.28,
+        angle: Math.random() * Math.PI * 2,
+        type: 'decorative',
+        color: '#fef08a',
+        size: 2.2,
+        x: body.x,
+        y: body.y,
+      });
+    } else {
+      // 35% chance to spawn a generic decorative satellite
+      if (Math.random() < 0.35 && body.radius >= 3.0) {
+        list.push({
+          id: `sat-dec-generic-${Math.random().toString(36).substr(2, 9)}`,
+          parentId: body.id,
+          orbitRadius: body.radius + 6.0 + Math.random() * 8.0,
+          orbitSpeed: (0.4 + Math.random() * 0.8) * (Math.random() > 0.5 ? 1 : -1),
+          angle: Math.random() * Math.PI * 2,
+          type: 'decorative',
+          color: Math.random() > 0.5 ? '#cbd5e1' : '#a78bfa',
+          size: 1.2 + Math.random() * 0.8,
+          x: body.x,
+          y: body.y,
+        });
+      }
+    }
+  }
+
+  return list;
+};
+
 
 type SpaceAmbienceHandle = {
   stop: () => void;
@@ -27,7 +148,7 @@ const createSpaceMissionMusic = (
   const source = audioContext.createMediaElementSource(audio);
   source.connect(audioContext.destination);
 
-  void audio.play();
+  void audio.play().catch(() => undefined);
 
   return {
     stop: () => {
@@ -157,6 +278,7 @@ function App() {
   // Combat mutable refs for high-fps updates
   const bulletsRef = useRef<Bullet[]>([]);
   const alienShipsRef = useRef<AlienShip[]>([]);
+  const satellitesRef = useRef<Satellite[]>([]);
   const spawnAlienTimerRef = useRef<number>(0);
   const shootCooldownRef = useRef<number>(0);
 
@@ -222,7 +344,7 @@ function App() {
   const lastFpsTimeRef = useRef<number>(0);
 
   // Canvas draw callback registration
-  const drawCallbackRef = useRef<(() => void) | null>(null);
+  const drawCallbackRef = useRef<((dt: number) => void) | null>(null);
 
   // Spawners for Aliens and Player Laser
   const spawnAlienShip = () => {
@@ -241,17 +363,69 @@ function App() {
     const vx = tx * orbitalSpeed + Math.cos(angle) * inwardSpeed;
     const vy = ty * orbitalSpeed + Math.sin(angle) * inwardSpeed;
 
+    const rand = Math.random();
+    let radius = 6.0;
+    let color = '#10b981';
+    let hp = 20;
+    let shootCooldown = 1.5 + Math.random() * 1.5;
+    let shipType: 'saucer' | 'scout' | 'cruiser' | 'bomber' | 'kamikaze' = 'saucer';
+    let maxSpeed = 35;
+
+    if (rand < 0.20) {
+      // Scout: Fast, agile, low HP
+      shipType = 'scout';
+      radius = 4.2;
+      color = '#a855f7';
+      hp = 10;
+      shootCooldown = 1.0 + Math.random() * 1.0;
+      maxSpeed = 55;
+    } else if (rand < 0.40) {
+      // Cruiser: Slow, heavy, tank HP
+      shipType = 'cruiser';
+      radius = 10.0;
+      color = '#f97316';
+      hp = 60;
+      shootCooldown = 2.5 + Math.random() * 2.0;
+      maxSpeed = 20;
+    } else if (rand < 0.60) {
+      // Bomber: Bulky warning theme, drops float mines
+      shipType = 'bomber';
+      radius = 9.0;
+      color = '#eab308'; // Amber/Yellow
+      hp = 70;
+      shootCooldown = 3.5 + Math.random() * 2.0;
+      maxSpeed = 22;
+    } else if (rand < 0.80) {
+      // Kamikaze: Fast wedge, suicide charge, fragile
+      shipType = 'kamikaze';
+      radius = 5.0;
+      color = '#f43f5e'; // Rose/Red
+      hp = 15;
+      shootCooldown = 99999.0;
+      maxSpeed = 38;
+    } else {
+      // Saucer: Standard
+      shipType = 'saucer';
+      radius = 6.0;
+      color = '#10b981';
+      hp = 20;
+      shootCooldown = 1.5 + Math.random() * 1.5;
+      maxSpeed = 35;
+    }
+
     const newAlien: AlienShip = {
       id: `alien-${Math.random().toString(36).substr(2, 9)}`,
       x: sx,
       y: sy,
       vx,
       vy,
-      radius: 6.0,
-      color: '#10b981',
-      hp: 20,
-      maxHp: 20,
-      shootCooldown: 1.5 + Math.random() * 1.5,
+      radius,
+      color,
+      hp,
+      maxHp: hp,
+      shootCooldown,
+      shipType,
+      maxSpeed,
     };
 
     alienShipsRef.current.push(newAlien);
@@ -332,6 +506,8 @@ function App() {
     // Reset Combat States
     bulletsRef.current = [];
     alienShipsRef.current = [];
+    const nextSatellites = generateSatellitesForPreset(initializedBodies);
+    satellitesRef.current = nextSatellites;
     spawnAlienTimerRef.current = 3.0; // Start at 3.0 so the next one spawns in 3 seconds (with a 6-second cooldown)
     shootCooldownRef.current = 0;
     killCountRef.current = 0;
@@ -411,6 +587,23 @@ function App() {
             configRef.current,
             dt,
           );
+        }
+
+        // Step satellites (moves orbits, handles defensive targeting/firing)
+        if (satellitesRef.current.length > 0) {
+          const { satellites: nextSats, bullets: nextBuls } = stepSatellites(
+            satellitesRef.current,
+            bodiesRef.current,
+            alienShipsRef.current,
+            bulletsRef.current,
+            configRef.current,
+            dt,
+            () => {
+              playLazerSound();
+            }
+          );
+          satellitesRef.current = nextSats;
+          bulletsRef.current = nextBuls;
         }
 
         // Spaceship physics step
@@ -500,7 +693,7 @@ function App() {
 
       // 3. Draw scene
       if (drawCallbackRef.current) {
-        drawCallbackRef.current();
+        drawCallbackRef.current(dt);
       }
 
       // 4. Track FPS, Body Count, and Spaceship HUD telemetry
@@ -532,7 +725,7 @@ function App() {
     return () => cancelAnimationFrame(animationId);
   }, []);
 
-  const registerDrawCallback = (callback: () => void) => {
+  const registerDrawCallback = (callback: (dt: number) => void) => {
     drawCallbackRef.current = callback;
   };
 
@@ -549,6 +742,7 @@ function App() {
         shipRef={shipRef}
         bulletsRef={bulletsRef}
         alienShipsRef={alienShipsRef}
+        satellitesRef={satellitesRef}
       />
 
       {/* Floating inspector panel */}

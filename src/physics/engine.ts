@@ -1,4 +1,4 @@
-import type { Body, PhysicsConfig, Spaceship, Bullet, AlienShip } from './types';
+import type { Body, PhysicsConfig, Spaceship, Bullet, AlienShip, Satellite } from './types';
 
 // Softening factor to prevent divide-by-zero or infinite forces at close distances
 const SOFTENING = 15;
@@ -351,6 +351,26 @@ export function stepSpaceship(
   };
 }
 
+function getAlienSeed(id: string): number {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) {
+    hash = (hash << 5) - hash + id.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash) % 100;
+}
+
+function pointInTriangle(px: number, py: number, x1: number, y1: number, x2: number, y2: number, x3: number, y3: number): boolean {
+  const d1 = (px - x2) * (y1 - y2) - (x1 - x2) * (py - y2);
+  const d2 = (px - x3) * (y2 - y3) - (x2 - x3) * (py - y3);
+  const d3 = (px - x1) * (y3 - y1) - (x3 - x1) * (py - y1);
+
+  const has_neg = (d1 < 0) || (d2 < 0) || (d3 < 0);
+  const has_pos = (d1 > 0) || (d2 > 0) || (d3 > 0);
+
+  return !(has_neg && has_pos);
+}
+
 /**
  * Steps the combat physics: moves bullets, updates alien ships, manages laser firing,
  * and handles damage checks and hits.
@@ -388,6 +408,8 @@ export function stepCombat(
 
   // 2. Move and step Alien Ships
   const nextAlienShips: AlienShip[] = [];
+  const hitShipsSet = new Set<string>();
+
   for (let i = 0; i < alienShips.length; i++) {
     const alien = alienShips[i];
     
@@ -402,11 +424,28 @@ export function stepCombat(
     const dy = target.y - alien.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
 
+    // Physical collision check with Earth
+    if (earth && target === earth && dist < earth.radius + alien.radius) {
+      hitShipsSet.add(alien.id);
+      earthDamage += alien.shipType === 'kamikaze' ? 20 : 10;
+      if (onAlienDestroyed) {
+        onAlienDestroyed(alien.id, alien.x, alien.y);
+      }
+      continue; // Alien exploded on impact, skip moving/firing
+    }
+
+    // Kamikaze speed boost charging when close to Earth
+    const isKamikaze = alien.shipType === 'kamikaze';
+    const isCharging = isKamikaze && earth && dist < 300;
+
     // Apply thrust towards target
     let ax = 0;
     let ay = 0;
     if (dist > 0) {
-      const seekAcceleration = 50; // units/s^2
+      let seekAcceleration = 50; // units/s^2
+      if (isCharging) {
+        seekAcceleration = 180; // hyper acceleration suicide charge
+      }
       ax = (dx / dist) * seekAcceleration;
       ay = (dy / dist) * seekAcceleration;
     }
@@ -431,7 +470,10 @@ export function stepCombat(
 
     // Cap velocity
     const speed = Math.sqrt(alien.vx * alien.vx + alien.vy * alien.vy);
-    const maxSpeed = 35;
+    let maxSpeed = alien.maxSpeed || 35;
+    if (isCharging) {
+      maxSpeed = 90; // charge velocity limit
+    }
     if (speed > maxSpeed) {
       alien.vx = (alien.vx / speed) * maxSpeed;
       alien.vy = (alien.vy / speed) * maxSpeed;
@@ -443,24 +485,120 @@ export function stepCombat(
 
     // Firing logic: if close to Earth, fire a bullet!
     if (earth && dist < 450 && alien.shootCooldown <= 0) {
-      // Fire bullet towards Earth
-      const bulletSpeed = 160;
-      const bVx = (dx / dist) * bulletSpeed + alien.vx * 0.3;
-      const bVy = (dy / dist) * bulletSpeed + alien.vy * 0.3;
+      const tSec = performance.now() * 0.001;
+      const seed = getAlienSeed(alien.id);
+      const bobSimX = Math.cos(tSec * 0.35 + seed * 1.5) * (alien.radius * 0.08);
+      const bobSimY = Math.sin(tSec * 0.45 + seed * 2.0) * (alien.radius * 0.08);
+      const fireX = alien.x + bobSimX;
+      const fireY = alien.y + bobSimY;
 
-      nextBullets.push({
-        id: `alien-bullet-${Math.random().toString(36).substr(2, 9)}`,
-        x: alien.x,
-        y: alien.y,
-        vx: bVx,
-        vy: bVy,
-        isEnemy: true,
-        radius: 3.5,
-        color: '#ff3366', // red enemy plasma
-        lifeTime: 4.5,
-      });
+      const type = alien.shipType || 'saucer';
 
-      alien.shootCooldown = 2.0 + Math.random() * 1.5; // fire every 2 - 3.5s
+      if (type === 'scout') {
+        // Scout: Fires two rapid parallel purple lasers from wingtips
+        const angle = Math.atan2(dy, dx);
+        const cos = Math.cos(angle);
+        const sin = Math.sin(angle);
+        const perpX = -sin * (alien.radius * 1.0);
+        const perpY = cos * (alien.radius * 1.0);
+
+        const bulletSpeed = 210;
+        const bVx = cos * bulletSpeed + alien.vx * 0.3;
+        const bVy = sin * bulletSpeed + alien.vy * 0.3;
+
+        nextBullets.push({
+          id: `alien-bullet-${Math.random().toString(36).substr(2, 9)}`,
+          x: fireX + perpX,
+          y: fireY + perpY,
+          vx: bVx,
+          vy: bVy,
+          isEnemy: true,
+          radius: 2.2,
+          color: '#c084fc', // purple
+          lifeTime: 4.0,
+        });
+
+        nextBullets.push({
+          id: `alien-bullet-${Math.random().toString(36).substr(2, 9)}`,
+          x: fireX - perpX,
+          y: fireY - perpY,
+          vx: bVx,
+          vy: bVy,
+          isEnemy: true,
+          radius: 2.2,
+          color: '#c084fc', // purple
+          lifeTime: 4.0,
+        });
+
+        alien.shootCooldown = 1.0 + Math.random() * 0.8; // fire faster: 1.0 - 1.8s
+      } else if (type === 'cruiser') {
+        // Cruiser: Heavy triple plasma burst spread
+        const angle = Math.atan2(dy, dx);
+        const spreadAngles = [-0.22, 0, 0.22]; // in radians
+        const bulletSpeed = 145;
+
+        spreadAngles.forEach((offsetAngle) => {
+          const finalAngle = angle + offsetAngle;
+          const bVx = Math.cos(finalAngle) * bulletSpeed + alien.vx * 0.3;
+          const bVy = Math.sin(finalAngle) * bulletSpeed + alien.vy * 0.3;
+
+          nextBullets.push({
+            id: `alien-bullet-${Math.random().toString(36).substr(2, 9)}`,
+            x: fireX,
+            y: fireY,
+            vx: bVx,
+            vy: bVy,
+            isEnemy: true,
+            radius: 4.5,
+            color: '#f97316', // orange
+            lifeTime: 5.0,
+          });
+        });
+
+        alien.shootCooldown = 3.2 + Math.random() * 1.5; // slow reload: 3.2 - 4.7s
+      } else if (type === 'bomber') {
+        // Bomber: Drops slow warning floating proximity mines behind itself
+        const velocitySpeed = Math.sqrt(alien.vx * alien.vx + alien.vy * alien.vy);
+        const backX = velocitySpeed > 0.1 ? -(alien.vx / velocitySpeed) * (alien.radius * 1.3) : 0;
+        const backY = velocitySpeed > 0.1 ? -(alien.vy / velocitySpeed) * (alien.radius * 1.3) : 0;
+
+        nextBullets.push({
+          id: `alien-mine-${Math.random().toString(36).substr(2, 9)}`,
+          x: alien.x + backX,
+          y: alien.y + backY,
+          vx: alien.vx * 0.1, // slow float
+          vy: alien.vy * 0.1,
+          isEnemy: true,
+          radius: 6.5,
+          color: '#eab308', // amber/yellow warning
+          lifeTime: 12.0,
+          isMine: true,
+        });
+
+        alien.shootCooldown = 3.5 + Math.random() * 2.0; // drops every 3.5 - 5.5s
+      } else if (type === 'kamikaze') {
+        // Kamikaze doesn't fire normal bullets
+        alien.shootCooldown = 9999.0;
+      } else {
+        // Saucer: Standard single green laser shot
+        const bulletSpeed = 160;
+        const bVx = (dx / dist) * bulletSpeed + alien.vx * 0.3;
+        const bVy = (dy / dist) * bulletSpeed + alien.vy * 0.3;
+
+        nextBullets.push({
+          id: `alien-bullet-${Math.random().toString(36).substr(2, 9)}`,
+          x: fireX,
+          y: fireY,
+          vx: bVx,
+          vy: bVy,
+          isEnemy: true,
+          radius: 3.5,
+          color: '#10b981', // green enemy laser
+          lifeTime: 4.5,
+        });
+
+        alien.shootCooldown = 2.0 + Math.random() * 1.5; // 2.0 - 3.5s
+      }
     }
 
     nextAlienShips.push(alien);
@@ -468,7 +606,7 @@ export function stepCombat(
 
   // 3. Resolve Bullet Collisions
   const finalBullets: Bullet[] = [];
-  const hitShipsSet = new Set<string>();
+  const tSec = performance.now() * 0.001;
 
   for (let i = 0; i < nextBullets.length; i++) {
     const bullet = nextBullets[i];
@@ -488,7 +626,13 @@ export function stepCombat(
           
           // If it's an enemy bullet hitting Earth specifically, accumulate Earth damage
           if (planet.id === 'earth') {
-            earthDamage += 2; // 2 damage per hit (reduced by another 50%)
+            if (bullet.isMine) {
+              earthDamage += 15; // 15 damage for mines
+            } else if (bullet.radius > 4.0) {
+              earthDamage += 5; // 5 damage for heavy cruiser plasma
+            } else {
+              earthDamage += 2; // 2 damage for standard shots
+            }
           }
           break;
         }
@@ -503,13 +647,95 @@ export function stepCombat(
         const alien = nextAlienShips[j];
         if (hitShipsSet.has(alien.id)) continue;
 
-        const aDx = alien.x - bullet.x;
-        const aDy = alien.y - bullet.y;
-        const aDist = Math.sqrt(aDx * aDx + aDy * aDy);
+        const seed = getAlienSeed(alien.id);
+        const bobSimX = Math.cos(tSec * 0.35 + seed * 1.5) * (alien.radius * 0.08);
+        const bobSimY = Math.sin(tSec * 0.45 + seed * 2.0) * (alien.radius * 0.08);
+
+        const cx = alien.x + bobSimX;
+        const cy = alien.y + bobSimY;
+
+        // Compute same finalRotation as drawing code (wobble + velocity-based angle)
+        const wobble = Math.sin(tSec * 0.6 + seed) * 0.03;
+        const speed = Math.sqrt(alien.vx * alien.vx + alien.vy * alien.vy);
+        const velAngle = speed > 0.01 ? Math.atan2(alien.vy, alien.vx) : -Math.PI / 2;
+        const finalRotation = velAngle + Math.PI / 2 + wobble;
+
+        // Transform bullet position to alien local unrotated space
+        const dx = bullet.x - cx;
+        const dy = bullet.y - cy;
+        const cos = Math.cos(-finalRotation);
+        const sin = Math.sin(-finalRotation);
+        const localX = dx * cos - dy * sin;
+        const localY = dx * sin + dy * cos;
+
+        const type = alien.shipType || 'saucer';
+        let isHit = false;
+
+        const zoom = config.cameraZoom || 1.0;
+        const r = Math.max(alien.radius, 5.5 / zoom);
+        const br = Math.max(bullet.radius, 1.5 / zoom);
+
+        if (type === 'scout') {
+          // Scout shape: delta wing (represented by two triangles meeting at the center line)
+          // Nose: (0, -1.5 * r)
+          // Left Wingtip: (-1.35 * r, 0.85 * r)
+          // Right Wingtip: (1.35 * r, 0.85 * r)
+          // Center Tail: (0, 0.3 * r)
+          const x1 = 0;
+          const y1 = -1.5 * r - br;
+          const xTail = 0;
+          const yTail = 0.3 * r + br;
+          const xLeft = -1.35 * r - br;
+          const yLeft = 0.85 * r + br;
+          const xRight = 1.35 * r + br;
+          const yRight = 0.85 * r + br;
+
+          isHit = pointInTriangle(localX, localY, x1, y1, xLeft, yLeft, xTail, yTail) ||
+                  pointInTriangle(localX, localY, x1, y1, xRight, yRight, xTail, yTail);
+        } else if (type === 'cruiser') {
+          // Cruiser shape: ellipse centered at localY = -0.55 * r
+          // width a = 1.7 * r
+          // height b = 0.95 * r
+          const centerY = -0.55 * r;
+          const a = 1.7 * r + br;
+          const b = 0.95 * r + br;
+          const normX = localX / a;
+          const normY = (localY - centerY) / b;
+          isHit = (normX * normX + normY * normY) <= 1.0;
+        } else if (type === 'bomber') {
+          // Bomber shape: bulky ellipse
+          const a = 1.6 * r + br;
+          const b = 1.4 * r + br;
+          const normX = localX / a;
+          const normY = localY / b;
+          isHit = (normX * normX + normY * normY) <= 1.0;
+        } else if (type === 'kamikaze') {
+          // Kamikaze shape: delta spike / triangle pointing up
+          // Nose at (0, -1.6 * r)
+          // Left wingtip at (-1.2 * r, 0.9 * r)
+          // Right wingtip at (1.2 * r, 0.9 * r)
+          const x1 = 0;
+          const y1 = -1.6 * r - br;
+          const xLeft = -1.2 * r - br;
+          const yLeft = 0.9 * r + br;
+          const xRight = 1.2 * r + br;
+          const yRight = 0.9 * r + br;
+          isHit = pointInTriangle(localX, localY, x1, y1, xLeft, yLeft, xRight, yRight);
+        } else {
+          // Saucer shape: ellipse
+          // width a = 1.55 * r
+          // height b = 0.65 * r
+          const a = 1.55 * r + br;
+          const b = 0.65 * r + br;
+          const normX = localX / a;
+          const normY = localY / b;
+          isHit = (normX * normX + normY * normY) <= 1.0;
+        }
 
         // Hit alien ship!
-        if (aDist < alien.radius + bullet.radius) {
-          alien.hp -= 10; // take 10 damage
+        if (isHit) {
+          const damage = bullet.isMissile ? 55 : 10; // Defensive space probe missile deals massive damage
+          alien.hp -= damage;
           bulletAbsorbed = true;
 
           if (alien.hp <= 0) {
@@ -537,3 +763,106 @@ export function stepCombat(
     earthDamage,
   };
 }
+
+/**
+ * Steps the orbital position of decorative and defensive satellites,
+ * and handles the automatic targeting and firing logic of the Earth defensive space probe.
+ */
+export function stepSatellites(
+  satellites: Satellite[],
+  bodies: Body[],
+  alienShips: AlienShip[],
+  bullets: Bullet[],
+  config: PhysicsConfig,
+  dt: number,
+  onMissileFired?: () => void
+): {
+  satellites: Satellite[];
+  bullets: Bullet[];
+} {
+  const actualDt = dt * config.timeScale;
+  if (actualDt <= 0) return { satellites, bullets };
+
+  const nextSatellites: Satellite[] = [];
+  const nextBullets = [...bullets];
+
+  for (let i = 0; i < satellites.length; i++) {
+    const sat = satellites[i];
+
+    // Find parent body
+    const parent = bodies.find(b => b.id === sat.parentId);
+    if (!parent || parent.crushed) {
+      // If the parent planet was destroyed or absorbed, the satellite is destroyed/lost.
+      continue;
+    }
+
+    // Update orbit angle
+    sat.angle += sat.orbitSpeed * actualDt;
+    sat.angle = (sat.angle + Math.PI * 2) % (Math.PI * 2);
+
+    // Calculate simulation coordinates relative to parent planet
+    sat.x = parent.x + Math.cos(sat.angle) * sat.orbitRadius;
+    sat.y = parent.y + Math.sin(sat.angle) * sat.orbitRadius;
+
+    // Firing logic for defensive satellite
+    if (sat.type === 'defensive') {
+      if (sat.shootCooldown !== undefined && sat.shootCooldown > 0) {
+        sat.shootCooldown -= actualDt;
+      }
+
+      if (sat.shootCooldown === undefined || sat.shootCooldown <= 0) {
+        // Find the nearest alien ship
+        let nearestAlien: AlienShip | null = null;
+        let minDist = Infinity;
+
+        for (let j = 0; j < alienShips.length; j++) {
+          const alien = alienShips[j];
+          const dx = alien.x - sat.x;
+          const dy = alien.y - sat.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist < minDist) {
+            minDist = dist;
+            nearestAlien = alien;
+          }
+        }
+
+        // Fire missile at the nearest enemy (if there is one)
+        if (nearestAlien) {
+          const dx = nearestAlien.x - sat.x;
+          const dy = nearestAlien.y - sat.y;
+          const missileSpeed = 240; // High speed rocket projectile
+          const vx = (dx / minDist) * missileSpeed + parent.vx * 0.5;
+          const vy = (dy / minDist) * missileSpeed + parent.vy * 0.5;
+
+          const newBullet: Bullet = {
+            id: `defensive-missile-${Math.random().toString(36).substr(2, 9)}`,
+            x: sat.x,
+            y: sat.y,
+            vx,
+            vy,
+            isEnemy: false, // Player-aligned
+            radius: 3.5, // Plump projectile
+            color: '#38bdf8', // Cyan/sky blue glow
+            lifeTime: 4.5,
+            isMissile: true, // Render as a missile
+          };
+
+          nextBullets.push(newBullet);
+          sat.shootCooldown = 4.0; // Shoot every 4 seconds
+
+          if (onMissileFired) {
+            onMissileFired();
+          }
+        }
+      }
+    }
+
+    nextSatellites.push(sat);
+  }
+
+  return {
+    satellites: nextSatellites,
+    bullets: nextBullets,
+  };
+}
+
